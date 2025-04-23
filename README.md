@@ -1,13 +1,13 @@
-
 # Prompter
 
-`prompter` is an idiomatic Go library for building LLaMA- and Chat-style prompts in a fluent, role-delimited way. It lets you compose complex, multi-turn conversations with predefined roles (`system`, `user`, `assistant`) or any custom roles you like, plus built-in list formatting utilities.
+`prompter` is an idiomatic Go library for building LLaMA- and Chat-style prompts in a fluent, role-delimited way.  
+It supports predefined roles (`system`, `user`, `assistant`), arbitrary custom roles, built-in list formatting, and a simple multimodal attachment API for visual workflows.
 
 ---
 
 ## Installation
 
-```bash 
+```bash
 go get github.com/grahms/prompter
 ```
 
@@ -34,113 +34,79 @@ func main() {
 
 ---
 
+## Text-Only API
 
 
 ## Complex Multi-Turn Dialog Example
 
-Below is a realistic, multi-turn travel-planning dialog. We define a system prompt, a custom validator role to enforce date and budget formats, then simulate three back-and-forths between user and assistant—ending with the model’s next response.
+```go
+prompt := prompter.New().
+  System("You are a professional travel-planning assistant.").
+  Role("validator", "Ensure dates use YYYY-MM-DD and budget is positive integer.").
+  User("I want to plan a trip to Paris.").
+  Assistant("Sure! What are your dates and budget?").
+  User("2025-05-10 to 2025-05-20; NY→CDG; Budget: 1500 USD.").
+  Assistant("Here’s a high-level itinerary:\n1. …").
+  User("Add local culinary experiences on Day 3 and Day 5.").
+  Assistant("").
+  Build()
+```
+
+Sent to your LLM, the model will generate the next `<|assistant|>` response in context.
+
+---
+
+## Multimodal / Visual Prompts
+
+Most LLaMA-style endpoints accept **text only**, but you can prepare a combined payload for a multimodal API:
+
+1. **Attachment**: an image URL or raw bytes.
+2. **VisualPromptBuilder**: reuse the same role API and add images.
 
 ```go
-package main
+vb := prompter.NewVisualBuilder().
+  System("You are an image captioning assistant. Generate a concise caption.").
+  AddImageURL("input_image", "https://…/dog.jpg").
+  Assistant("")
 
-import (
-  "fmt"
-  "github.com/grahms/prompter"
-)
+payload, err := vb.BuildJSON()
+```
 
-func main() {
-  // Step 1: Define travel parameters
-  // Step 2: Ask follow-up questions
-  // Step 3: Provide an initial itinerary
-  // Step 4: Refine with culinary suggestions
-
-  prompt := prompter.New().
-    System(
-      "You are a professional travel-planning assistant. " +
-      "You propose detailed multi-day itineraries (flights, hotels, activities) " +
-      "and can refine suggestions on request.",
-    ).
-    Role(prompter.Role("validator"),
-      "Ensure all dates use YYYY-MM-DD format and budget is a positive integer.",
-    ).
-    User("I want to plan a trip to Paris.").
-    Assistant("Sure! What are your travel dates and budget?").
-    User("Dates: 2025-05-10 to 2025-05-20; Departing from New York City; Budget: 1500 USD.").
-    Assistant(
-      "Great! Here is a high-level itinerary:\n" +
-      "1. Flight NYC→CDG on 2025-05-10, Economy.\n" +
-      "2. Hotel: Hôtel Le Régent (5 nights).\n" +
-      "3. Day 1: Louvre + Seine river cruise.\n" +
-      "… (days 2-10 itinerary)…\n",
-    ).
-    User("Can you add local culinary experiences on Day 3 and Day 5?").
-    Assistant("").
-    Build()
-
-  fmt.Println(prompt)
+```json
+{
+  "text": "<|system|>\nYou are an image captioning assistant...\n\n<|assistant|>\n\n\n",
+  "attachments": [
+    { "Name": "input_image", "URL": "https://…/dog.jpg" }
+  ]
 }
 ```
 
-This produces the following raw prompt:
-
-```
-<|system|>
-You are a professional travel-planning assistant. You propose detailed multi-day itineraries (flights, hotels, activities) and can refine suggestions on request.
-
-<|validator|>
-Ensure all dates use YYYY-MM-DD format and budget is a positive integer.
-
-<|user|>
-I want to plan a trip to Paris.
-
-<|assistant|>
-Sure! What are your travel dates and budget?
-
-<|user|>
-Dates: 2025-05-10 to 2025-05-20; Departing from New York City; Budget: 1500 USD.
-
-<|assistant|>
-Great! Here is a high-level itinerary:
-1. Flight NYC→CDG on 2025-05-10, Economy.
-2. Hotel: Hôtel Le Régent (5 nights).
-3. Day 1: Louvre + Seine river cruise.
-… (days 2-10 itinerary)…
-
-<|user|>
-Can you add local culinary experiences on Day 3 and Day 5?
-
-<|assistant|>
-
-```
-
-At this point, sending that prompt to your LLaMA-style or Chat API will generate a detailed response for the final `<|assistant|>` block, incorporating all prior context and the validator’s directive.
+> **Note**:
+> - **LLaMA itself is text-only** and will ignore attachments if sent to its endpoint.
+> - To use images, send this payload to a **multimodal** or **vision-capable** API (e.g. Titan Vision, Claude+Vision).
 
 ---
 
 ## Why Roles & Structured Dialogs?
 
-1. **Clarity & Modularity**  
-   Each `<|role|>` block isolates intent:
-  - `<|system|>` for global rules
-  - `<|user|>` for actual input
-  - `<|assistant|>` marks reply points
-  - `<|validator|>` (custom) for format checks
+1. **Separation of Concerns**  
+   Each `<|role|>` block isolates intent—easy to read, extend, and debug.
 
 2. **Model Alignment**  
-   Chat-trained models expect these delimiters. They respect `<|system|>` instructions above everything else, parse `<|user|>` as queries, and know to generate at `<|assistant|>`.
+   Chat-trained models expect `<|system|>`, `<|user|>`, `<|assistant|>` delimiters.
 
 3. **Maintainability**  
-   To insert a new validation step, simply add:
+   Insert new steps via:
    ```go
-   Role("validator", "Ensure currency is USD.")
+   builder.Role("validator", "Ensure currency is USD.")
    ```
-   No fragile string splicing required.
+   No fragile text splicing.
 
 ---
 
 ## Testing
 
-BDD-style GoConvey tests are included:
+BDD-style tests with [GoConvey](https://github.com/smartystreets/goconvey):
 
 ```bash
 go get github.com/smartystreets/goconvey
@@ -149,6 +115,18 @@ go test ./...
 
 ---
 
+## Contributing
+
+1. Fork & clone
+2. Branch (`git checkout -b feature/XYZ`)
+3. `go mod tidy` & `gofmt -s -w .`
+4. Update `README.md` if needed
+5. PR against `main`
+
+See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) and [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+---
+
 ## License
 
-Released under MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](./LICENSE) for details.
